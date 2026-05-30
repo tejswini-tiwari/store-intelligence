@@ -41,7 +41,7 @@ class StoreEvent(BaseModel):
     dwell_ms: int = 0
     is_staff: bool = False
     confidence: float = Field(ge=0.0, le=1.0)
-    metadata: EventMetadata = Field(default=EventMetadata)
+    metadata: EventMetadata = Field(default_factory=EventMetadata)
 
     @field_validator("timestamp")
     @classmethod
