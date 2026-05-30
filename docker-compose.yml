@@ -1,0 +1,52 @@
+version: '3.9'
+services:
+  api:
+    build: .
+    ports: 8000:8000
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://retail:retail@db:5432/storedb
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data:ro
+    healthcheck:
+      test: curl -f http://localhost:8000/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: retail
+      POSTGRES_PASSWORD: retail
+      POSTGRES_DB: storedb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U retail
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: 6379:6379
+
+  dashboard:
+    build: .
+    command: python dashboard/live.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - API_URL=http://api:8000
+    depends_on:
+      - redis
+      - api
+
+volumes:
+  postgres_data:
