@@ -1,0 +1,11 @@
+[run]
+concurrency = thread, greenlet
+source = app, pipeline
+omit =
+    */test_*
+    */__pycache__/*
+    pipeline/run.sh
+
+[report]
+show_missing = true
+skip_covered = false

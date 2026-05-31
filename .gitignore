@@ -1,0 +1,7 @@
+data/test_store.db
+data/*.db
+__pycache__/
+*.pyc
+.coverage
+.coverage.*
+htmlcov/
