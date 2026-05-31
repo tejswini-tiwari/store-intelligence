@@ -72,15 +72,27 @@ class AnomalyItem(BaseModel):
 
 
 class MetricsResponse(BaseModel):
-    # fields to be added in metrics.py session
-    pass
+    store_id: str
+    date: str
+    unique_visitors: int = 0
+    conversion_rate: float = 0.0
+    avg_dwell_per_zone: dict = {}
+    current_queue_depth: int = 0
+    abandonment_rate: float = 0.0
+    computed_at: str
 
 
 class FunnelResponse(BaseModel):
-    # fields to be added in metrics.py session
-    pass
+    store_id: str
+    date: str
+    funnel: dict = {}
+    drop_off_pct: dict = {}
+    computed_at: str
 
 
 class HeatmapResponse(BaseModel):
-    # fields to be added in metrics.py session
-    pass
+    store_id: str
+    date: str
+    zones: dict = {}
+    data_confidence: bool = True
+    computed_at: str

@@ -251,13 +251,13 @@ def process_video(video_path: str, store_id: str,
                     (tracker.get_current_zone(
                         ((data['bbox'][0] + data['bbox'][2]) / 2,
                          (data['bbox'][1] + data['bbox'][3]) / 2),
-                        layout["zone_polygons"
-                    ].upper() == "BILLING" or
+                        layout["zone_polygons"]
+                    ).upper() == "BILLING" or
                     "billing" in tracker.get_current_zone(
                         ((data['bbox'][0] + data['bbox'][2]) / 2,
                          (data['bbox'][1] + data['bbox'][3]) / 2),
-                        layout["zone_polygons"
-                    ].lower()))
+                        layout["zone_polygons"]
+                    ).lower())
                 )
                 if queue_depth > 0:
                     emit_event({
