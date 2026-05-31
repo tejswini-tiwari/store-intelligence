@@ -1,7 +1,9 @@
 data/test_store.db
 data/*.db
+data/output/events.jsonl
 __pycache__/
 *.pyc
 .coverage
 .coverage.*
 htmlcov/
+*.mp4
