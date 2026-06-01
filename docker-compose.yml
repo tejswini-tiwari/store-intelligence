@@ -2,7 +2,8 @@ version: '3.9'
 services:
   api:
     build: .
-    ports: 8000:8000
+    ports:
+      - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://retail:retail@db:5432/storedb
       - REDIS_URL=redis://redis:6379
@@ -23,20 +24,21 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: retail
-      POSTGRES_PASSWORD: retail
-      POSTGRES_DB: storedb
+      - POSTGRES_USER=retail
+      - POSTGRES_PASSWORD=retail
+      - POSTGRES_DB=storedb
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: pg_isready -U retail
+      test: pg_isready -U retail -d storedb
       interval: 5s
       timeout: 3s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    ports: 6379:6379
+    ports:
+      - "6379:6379"
 
   dashboard:
     build: .
