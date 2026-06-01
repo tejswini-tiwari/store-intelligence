@@ -1,0 +1,32 @@
+{
+  "Front_Gate.mp4": {
+    "store_id": "ST1008",
+    "camera_id": "CAM_ENTRY_01",
+    "role": "entry",
+    "clip_start": "2026-04-10T20:09:00+05:30"
+  },
+  "Cash_Counter_top_view.mp4": {
+    "store_id": "ST1008",
+    "camera_id": "CAM_BILLING_01",
+    "role": "billing",
+    "clip_start": "2026-04-10T20:09:00+05:30"
+  },
+  "Left_part_of_the_shop_with_cash_counter.mp4": {
+    "store_id": "ST1008",
+    "camera_id": "CAM_FLOOR_01",
+    "role": "floor",
+    "clip_start": "2026-04-10T20:09:00+05:30"
+  },
+  "Right_part_of_the_shop_with_cash_counter.mp4": {
+    "store_id": "ST1008",
+    "camera_id": "CAM_FLOOR_02",
+    "role": "floor",
+    "clip_start": "2026-04-10T20:09:00+05:30"
+  },
+  "Store_Room.mp4": {
+    "store_id": "ST1008",
+    "camera_id": "CAM_STOREROOM_01",
+    "role": "exclude",
+    "clip_start": "2026-04-10T20:09:00+05:30"
+  }
+}

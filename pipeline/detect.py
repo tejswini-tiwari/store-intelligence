@@ -89,8 +89,12 @@ def compute_clip_timestamp(clip_start_iso: str,
 
 
 def process_video(video_path: str, store_id: str,
-                  camera_id: str, model: YOLO,
+                  camera_id: str, role: str, model: YOLO,
                   layout: dict, clip_start_iso: str) -> None:
+    if role == "exclude":
+        logging.info(f"Camera {camera_id} has role 'exclude' — skipping")
+        return
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logging.error(f"Cannot open video: {video_path}")
@@ -110,8 +114,9 @@ def process_video(video_path: str, store_id: str,
     prev_centroids = {}
     frame_count = 0
     total_events = 0
-    is_entry_cam = "ENTRY" in camera_id
-    is_main_floor = "MAIN_FLOOR" in camera_id
+    is_entry_cam = role == "entry"
+    is_floor_cam = role == "floor"
+    is_billing_cam = role == "billing"
 
     while True:
         ret, frame = cap.read()
@@ -173,7 +178,7 @@ def process_video(video_path: str, store_id: str,
                 })
                 total_events += 1
 
-            if is_entry_cam and not is_main_floor:
+            if is_entry_cam and not is_floor_cam:
                 prev_y = prev_centroids.get(track_id)
                 if prev_y is not None:
                     direction = classify_direction(
@@ -240,7 +245,7 @@ def process_video(video_path: str, store_id: str,
                     total_events += 1
 
             current_zone = tracker.get_current_zone(centroid, layout["zone_polygons"])
-            if current_zone and (current_zone.upper() == "BILLING" or "billing" in current_zone.lower()):
+            if is_billing_cam and current_zone and (current_zone.upper() == "BILLING" or "billing" in current_zone.lower()):
                 queue_depth = sum(
                     1 for tid, data in tracker.active_tracks.items()
                     if tracker.get_current_zone(
@@ -290,6 +295,8 @@ def main():
     parser.add_argument("--camera-id", required=True, help="Camera identifier")
     parser.add_argument("--model", default="yolov8m.pt", help="Path to YOLO model file")
     parser.add_argument("--layout", default="./data/store_layout.json", help="Path to store layout JSON")
+    parser.add_argument("--role", required=True, choices=["entry", "billing", "floor", "exclude"],
+                        help="Camera role: entry, billing, floor, exclude")
     parser.add_argument("--clip-start", default="2026-03-03T09:00:00Z", help="ISO timestamp for clip start")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"], help="Logging level")
 
@@ -302,7 +309,7 @@ def main():
 
     model = load_model(args.model)
     layout = load_store_layout(args.layout, args.store_id)
-    process_video(args.video, args.store_id, args.camera_id, model, layout, args.clip_start)
+    process_video(args.video, args.store_id, args.camera_id, args.role, model, layout, args.clip_start)
 
 
 if __name__ == "__main__":

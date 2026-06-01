@@ -1,11 +1,10 @@
 #!/bin/bash
 # Store Intelligence Pipeline Runner
-# Processes all CCTV clips and feeds events to the API
+# Reads data/cameras.json to get store_id, camera_id, role, clip_start per clip.
 #
 # Usage:
 #   bash pipeline/run.sh
-#   bash pipeline/run.sh --clips ./data/clips/ \
-#        --layout ./data/store_layout.json
+#   bash pipeline/run.sh --clips ./data/clips/
 #
 # Environment variables:
 #   API_URL — defaults to http://localhost:8000
@@ -14,6 +13,7 @@
 set -e
 
 CLIPS_DIR="${CLIPS_DIR:-./data/clips}"
+CAMERAS_FILE="${CAMERAS_FILE:-./data/cameras.json}"
 LAYOUT_FILE="${LAYOUT_FILE:-./data/store_layout.json}"
 API_URL="${API_URL:-http://localhost:8000}"
 MODEL="${YOLO_MODEL:-yolov8m.pt}"
@@ -21,58 +21,72 @@ MODEL="${YOLO_MODEL:-yolov8m.pt}"
 echo "========================================"
 echo "Store Intelligence Pipeline"
 echo "========================================"
-echo "Clips dir:   $CLIPS_DIR"
-echo "Layout file: $LAYOUT_FILE"
-echo "API URL:     $API_URL"
-echo "Model:       $MODEL"
+echo "Clips dir:    $CLIPS_DIR"
+echo "Cameras file: $CAMERAS_FILE"
+echo "Layout file:  $LAYOUT_FILE"
+echo "API URL:      $API_URL"
+echo "Model:        $MODEL"
 echo ""
 
-# Wait for API to be ready
-echo "Waiting for API to be ready..."
-for i in $(seq 1 30); do
-    if curl -sf "$API_URL/health" > /dev/null 2>&1; then
-        echo "API is ready."
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo "ERROR: API not ready after 30 seconds"
-        exit 1
-    fi
-    sleep 1
-done
+python3 -c "
+import sys
+import json
+import os
+import subprocess
 
-# Process each clip
-CLIP_COUNT=0
-for clip in "$CLIPS_DIR"/*.mp4; do
-    if [ ! -f "$clip" ]; then
-        echo "No .mp4 clips found in $CLIPS_DIR"
-        break
-    fi
+cameras_file = sys.argv[1]
+clips_dir = sys.argv[2]
+model = sys.argv[3] if len(sys.argv) > 3 else 'yolov8m.pt'
+layout_file = sys.argv[4] if len(sys.argv) > 4 else './data/store_layout.json'
 
-    # Extract store_id and camera_id from filename
-    # Expected format: STORE_BLR_002_CAM_ENTRY_01.mp4
-    FILENAME=$(basename "$clip" .mp4)
-    STORE_ID=$(echo "$FILENAME" | cut -d_ -f1-3)
-    CAMERA_ID=$(echo "$FILENAME" | cut -d_ -f4-)
+with open(cameras_file, 'r') as f:
+    cameras = json.load(f)
 
-    echo "Processing: $FILENAME"
-    echo "  Store:  $STORE_ID"
-    echo "  Camera: $CAMERA_ID"
+has_clips = False
+for clip_name, config in cameras.items():
+    clip_path = os.path.join(clips_dir, clip_name)
+    if not os.path.isfile(clip_path):
+        print(f'WARN: {clip_path} not found, skipping', file=sys.stderr)
+        continue
 
-    python pipeline/detect.py \
-        --video "$clip" \
-        --store-id "$STORE_ID" \
-        --camera-id "$CAMERA_ID" \
-        --model "$MODEL" \
-        --layout "$LAYOUT_FILE" \
-        --log-level INFO
+    has_clips = True
+    role = config.get('role', '')
+    clip_start = config.get('clip_start', '')
 
-    CLIP_COUNT=$((CLIP_COUNT + 1))
-    echo "  Done."
-    echo ""
-done
+    if role == 'exclude':
+        print(f'SKIP: {clip_name} has role exclude -- no events emitted')
+        continue
 
+    store_id = config.get('store_id', '')
+    camera_id = config.get('camera_id', '')
+
+    print(f'Processing: {clip_name}')
+    print(f'  Store:  {store_id}')
+    print(f'  Camera: {camera_id}')
+    print(f'  Role:   {role}')
+    print(f'  Clip:   {clip_start}')
+
+    result = subprocess.run([
+        sys.executable, 'pipeline/detect.py',
+        '--video', clip_path,
+        '--store-id', store_id,
+        '--camera-id', camera_id,
+        '--role', role,
+        '--clip-start', clip_start,
+        '--model', model,
+        '--layout', layout_file,
+        '--log-level', 'INFO'
+    ])
+    if result.returncode != 0:
+        print(f'ERROR: detect.py failed for {clip_name}', file=sys.stderr)
+    else:
+        print(f'Done: {clip_name}')
+
+if not has_clips:
+    print('WARN: No clips found in cameras.json exist in --clips dir', file=sys.stderr)
+" "$CAMERAS_FILE" "$CLIPS_DIR" "$MODEL" "$LAYOUT_FILE"
+
+echo ""
 echo "========================================"
-echo "Pipeline complete. Processed $CLIP_COUNT clips."
-echo "Events written to: ./data/output/events.jsonl"
+echo "Pipeline complete."
 echo "========================================"
