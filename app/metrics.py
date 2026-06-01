@@ -1,18 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_
 from app.database import get_db, EventRecord, POSTransaction
 from app.models import MetricsResponse
+from app.timewindow import get_metric_time_filter, get_conversion_window_minutes
 from datetime import datetime, timezone, timedelta
 import logging
 
 router = APIRouter()
-
-
-def today_utc_range():
-    now = datetime.now(timezone.utc)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, now
 
 
 @router.get("/stores/{store_id}/metrics")
@@ -36,12 +31,12 @@ async def get_metrics(
          (is_staff=false) with their timestamps
        - Get all POS transactions for today from POSTransaction table
        - For each billing event: check if there is a POS transaction
-         for same store_id within the NEXT 5 minutes
+         for same store_id within the NEXT CONVERSION_WINDOW_MINUTES minutes
        - converted_visitors = distinct visitor_ids that had
          at least one such match
        - conversion_rate = converted_visitors / unique_visitors
-       - If unique_visitors = 0 → return 0.0 (never divide by zero)
-       - If no POS data exists → return 0.0 (not null, not error)
+       - If unique_visitors = 0 -> return 0.0 (never divide by zero)
+       - If no POS data exists -> return 0.0 (not null, not error)
 
     3. avg_dwell_per_zone: dict[str, float]
        For each zone_id: AVG(dwell_ms) from ZONE_DWELL events
@@ -71,8 +66,18 @@ async def get_metrics(
         "computed_at": "<current UTC ISO timestamp>"
     }
     """
-    start, end = today_utc_range()
-    today_date = start.date().isoformat()
+    start, end, date_label = get_metric_time_filter(store_id, db)
+    conv_window = get_conversion_window_minutes()
+
+    time_filter = []
+    if start is not None and end is not None:
+        time_filter.append(EventRecord.timestamp >= start)
+        time_filter.append(EventRecord.timestamp <= end)
+
+    pos_time_filter = []
+    if start is not None and end is not None:
+        pos_time_filter.append(POSTransaction.timestamp >= start)
+        pos_time_filter.append(POSTransaction.timestamp <= end)
 
     unique_visitors_result = await db.execute(
         select(func.count(func.distinct(EventRecord.visitor_id))).where(
@@ -80,8 +85,7 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "ENTRY",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
+                *time_filter
             )
         )
     )
@@ -93,28 +97,24 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_JOIN",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
+                *time_filter
             )
         )
     )
     billing_joins = billing_joins_result.all()
 
+    pos_filter = [POSTransaction.store_id == store_id]
+    if pos_time_filter:
+        pos_filter.extend(pos_time_filter)
     pos_transactions_result = await db.execute(
-        select(POSTransaction.timestamp).where(
-            and_(
-                POSTransaction.store_id == store_id,
-                POSTransaction.timestamp >= start,
-                POSTransaction.timestamp <= end
-            )
-        )
+        select(POSTransaction.timestamp).where(and_(*pos_filter))
     )
     pos_timestamps = [row[0] for row in pos_transactions_result.all()]
 
     converted_visitors = set()
     for visitor_id, join_time in billing_joins:
         for pos_time in pos_timestamps:
-            if join_time <= pos_time <= join_time + timedelta(minutes=5):
+            if join_time <= pos_time <= join_time + timedelta(minutes=conv_window):
                 converted_visitors.add(visitor_id)
                 break
 
@@ -126,8 +126,6 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "ZONE_DWELL",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end,
                 EventRecord.zone_id.isnot(None)
             )
         ).group_by(EventRecord.zone_id)
@@ -141,8 +139,6 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_JOIN",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
             )
         ).order_by(EventRecord.timestamp.desc()).limit(1)
     )
@@ -154,8 +150,6 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_ABANDON",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
             )
         )
     )
@@ -167,8 +161,6 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_JOIN",
                 EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
             )
         )
     )
@@ -176,9 +168,19 @@ async def get_metrics(
 
     abandonment_rate = abandon_count / join_count if join_count > 0 else 0.0
 
+    computed_date = date_label
+    if not computed_date:
+        max_ts_result = await db.execute(
+            select(func.max(EventRecord.timestamp)).where(
+                EventRecord.store_id == store_id
+            )
+        )
+        max_ts = max_ts_result.scalar()
+        computed_date = max_ts.date().isoformat() if max_ts else datetime.now(timezone.utc).date().isoformat()
+
     return {
         "store_id": store_id,
-        "date": today_date,
+        "date": computed_date,
         "unique_visitors": unique_visitors,
         "conversion_rate": round(conversion_rate, 4),
         "avg_dwell_per_zone": {k: round(v, 2) for k, v in avg_dwell_per_zone.items()},

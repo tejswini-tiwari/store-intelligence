@@ -2,15 +2,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from app.database import get_db, EventRecord, POSTransaction
+from app.timewindow import get_metric_time_filter, get_conversion_window_minutes
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
-
-
-def today_utc_range():
-    now = datetime.now(timezone.utc)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, now
 
 
 @router.get("/stores/{store_id}/funnel")
@@ -46,7 +41,7 @@ async def get_funnel(
     purchase_count:
       Count distinct visitor_ids where visitor had a
       BILLING_QUEUE_JOIN and a matching POS transaction
-      within 5 minutes (same logic as conversion_rate).
+      within CONVERSION_WINDOW_MINUTES minutes (same logic as conversion_rate).
 
     STEP 3 — Compute drop-off percentages:
     entry_to_zone_dropoff:
@@ -77,17 +72,25 @@ async def get_funnel(
         "computed_at": "<current UTC ISO timestamp>"
     }
     """
-    start, end = today_utc_range()
-    today_date = start.date().isoformat()
+    start, end, date_label = get_metric_time_filter(store_id, db)
+    conv_window = get_conversion_window_minutes()
+
+    time_filter = []
+    if start is not None and end is not None:
+        time_filter.append(EventRecord.timestamp >= start)
+        time_filter.append(EventRecord.timestamp <= end)
+
+    pos_time_filter = []
+    if start is not None and end is not None:
+        pos_time_filter.append(POSTransaction.timestamp >= start)
+        pos_time_filter.append(POSTransaction.timestamp <= end)
+
+    all_event_filter = [EventRecord.store_id == store_id, EventRecord.is_staff == False]
+    all_event_filter.extend(time_filter)
 
     events_result = await db.execute(
         select(EventRecord.visitor_id, EventRecord.event_type, EventRecord.timestamp, EventRecord.zone_id).where(
-            and_(
-                EventRecord.store_id == store_id,
-                EventRecord.is_staff == False,
-                EventRecord.timestamp >= start,
-                EventRecord.timestamp <= end
-            )
+            and_(*all_event_filter)
         )
     )
     events = events_result.all()
@@ -104,14 +107,11 @@ async def get_funnel(
         if "REENTRY" in event_types:
             reentry_visitors.add(visitor_id)
 
+    pos_filter = [POSTransaction.store_id == store_id]
+    if pos_time_filter:
+        pos_filter.extend(pos_time_filter)
     pos_transactions_result = await db.execute(
-        select(POSTransaction.timestamp).where(
-            and_(
-                POSTransaction.store_id == store_id,
-                POSTransaction.timestamp >= start,
-                POSTransaction.timestamp <= end
-            )
-        )
+        select(POSTransaction.timestamp).where(and_(*pos_filter))
     )
     pos_timestamps = [row[0] for row in pos_transactions_result.all()]
 
@@ -146,7 +146,7 @@ async def get_funnel(
 
             for join_time in billing_join_timestamps:
                 for pos_time in pos_timestamps:
-                    if join_time <= pos_time <= join_time + timedelta(minutes=5):
+                    if join_time <= pos_time <= join_time + timedelta(minutes=conv_window):
                         purchase_visitors.add(visitor_id)
                         break
 
@@ -159,9 +159,19 @@ async def get_funnel(
     zone_to_billing_dropoff = ((zone_visit_count - billing_queue_count) / zone_visit_count * 100) if zone_visit_count > 0 else 0.0
     billing_to_purchase_dropoff = ((billing_queue_count - purchase_count) / billing_queue_count * 100) if billing_queue_count > 0 else 0.0
 
+    computed_date = date_label
+    if not computed_date:
+        max_ts_result = await db.execute(
+            select(func.max(EventRecord.timestamp)).where(
+                EventRecord.store_id == store_id
+            )
+        )
+        max_ts = max_ts_result.scalar()
+        computed_date = max_ts.date().isoformat() if max_ts else datetime.now(timezone.utc).date().isoformat()
+
     return {
         "store_id": store_id,
-        "date": today_date,
+        "date": computed_date,
         "funnel": {
             "entry_count": entry_count,
             "zone_visit_count": zone_visit_count,

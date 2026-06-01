@@ -3,19 +3,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from app.database import get_db, EventRecord, POSTransaction
 from app.models import AnomalyItem, Severity
+from app.timewindow import get_metric_time_filter, get_conversion_window_minutes, METRIC_WINDOW
 from datetime import datetime, timezone, timedelta
 import logging
 
 router = APIRouter()
 
 
-def today_utc_range():
-    now = datetime.now(timezone.utc)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, now
-
-
-async def get_conversion_rate_for_date(db: AsyncSession, store_id: str, date_start: datetime, date_end: datetime) -> float:
+async def get_conversion_rate_for_range(db: AsyncSession, store_id: str,
+                                        date_start: datetime, date_end: datetime,
+                                        conv_window: int) -> float:
     unique_visitors_result = await db.execute(
         select(func.count(func.distinct(EventRecord.visitor_id))).where(
             and_(
@@ -59,7 +56,7 @@ async def get_conversion_rate_for_date(db: AsyncSession, store_id: str, date_sta
     converted_visitors = set()
     for visitor_id, join_time in billing_joins:
         for pos_time in pos_timestamps:
-            if join_time <= pos_time <= join_time + timedelta(minutes=5):
+            if join_time <= pos_time <= join_time + timedelta(minutes=conv_window):
                 converted_visitors.add(visitor_id)
                 break
 
@@ -80,9 +77,9 @@ async def get_anomalies(
     1. BILLING_QUEUE_SPIKE:
        Get latest queue_depth from BILLING_QUEUE_JOIN events
        in the last 10 minutes for this store.
-       If queue_depth > 10 → CRITICAL
-       If queue_depth > 5 → WARN
-       If queue_depth <= 5 → no anomaly
+       If queue_depth > 10 -> CRITICAL
+       If queue_depth > 5 -> WARN
+       If queue_depth <= 5 -> no anomaly
        suggested_action: "Deploy additional billing staff immediately"
        details: {"current_queue_depth": N}
 
@@ -90,8 +87,8 @@ async def get_anomalies(
        Today's conversion_rate (reuse logic from metrics.py).
        7-day rolling average: compute conversion_rate for each
        of the past 7 days, take the mean.
-       If today < 7day_avg * 0.5 → CRITICAL
-       If today < 7day_avg * 0.8 → WARN
+       If today < 7day_avg * 0.5 -> CRITICAL
+       If today < 7day_avg * 0.8 -> WARN
        Only emit if 7day_avg > 0 (skip if no historical data).
        suggested_action:
          "Review floor staff positioning and zone signage"
@@ -105,7 +102,7 @@ async def get_anomalies(
        For each zone_id that appears in events for this store:
        Check if there are zero ZONE_ENTER events in the
        last 30 minutes for that zone.
-       If yes → INFO anomaly
+       If yes -> INFO anomaly
        suggested_action:
          f"Check camera feed and foot traffic for zone {zone_id}"
        details: {"zone_id": zone_id, "minutes_since_activity": N}
@@ -123,6 +120,7 @@ async def get_anomalies(
     now = datetime.now(timezone.utc)
     ten_minutes_ago = now - timedelta(minutes=10)
     thirty_minutes_ago = now - timedelta(minutes=30)
+    conv_window = get_conversion_window_minutes()
 
     latest_queue_result = await db.execute(
         select(EventRecord.queue_depth, EventRecord.timestamp).where(
@@ -161,49 +159,51 @@ async def get_anomalies(
                     details={"current_queue_depth": queue_depth}
                 ))
 
-    start, end = today_utc_range()
-    today_rate = await get_conversion_rate_for_date(db, store_id, start, end)
+    start, end = None, None
+    if METRIC_WINDOW in ("today", "last24h"):
+        start, end, _ = await get_metric_time_filter(store_id, db)
+        today_rate = await get_conversion_rate_for_range(db, store_id, start, end, conv_window)
 
-    rates_7day = []
-    for i in range(1, 8):
-        day_start = start - timedelta(days=i)
-        day_end = end - timedelta(days=i)
-        rate = await get_conversion_rate_for_date(db, store_id, day_start, day_end)
-        rates_7day.append(rate)
+        rates_7day = []
+        for i in range(1, 8):
+            day_start = start - timedelta(days=i)
+            day_end = end - timedelta(days=i)
+            rate = await get_conversion_rate_for_range(db, store_id, day_start, day_end, conv_window)
+            rates_7day.append(rate)
 
-    valid_rates = [r for r in rates_7day if r > 0]
-    if valid_rates:
-        seven_day_avg = sum(valid_rates) / len(valid_rates)
-        if today_rate < seven_day_avg * 0.5:
-            drop_pct = ((seven_day_avg - today_rate) / seven_day_avg * 100) if seven_day_avg > 0 else 0
-            anomalies.append(AnomalyItem(
-                anomaly_type="CONVERSION_DROP",
-                severity=Severity.CRITICAL,
-                store_id=store_id,
-                zone_id=None,
-                detected_at=now,
-                suggested_action="Review floor staff positioning and zone signage",
-                details={
-                    "today_rate": round(today_rate, 4),
-                    "seven_day_avg": round(seven_day_avg, 4),
-                    "drop_pct": round(drop_pct, 2)
-                }
-            ))
-        elif today_rate < seven_day_avg * 0.8:
-            drop_pct = ((seven_day_avg - today_rate) / seven_day_avg * 100) if seven_day_avg > 0 else 0
-            anomalies.append(AnomalyItem(
-                anomaly_type="CONVERSION_DROP",
-                severity=Severity.WARN,
-                store_id=store_id,
-                zone_id=None,
-                detected_at=now,
-                suggested_action="Review floor staff positioning and zone signage",
-                details={
-                    "today_rate": round(today_rate, 4),
-                    "seven_day_avg": round(seven_day_avg, 4),
-                    "drop_pct": round(drop_pct, 2)
-                }
-            ))
+        valid_rates = [r for r in rates_7day if r > 0]
+        if valid_rates:
+            seven_day_avg = sum(valid_rates) / len(valid_rates)
+            if today_rate < seven_day_avg * 0.5:
+                drop_pct = ((seven_day_avg - today_rate) / seven_day_avg * 100) if seven_day_avg > 0 else 0
+                anomalies.append(AnomalyItem(
+                    anomaly_type="CONVERSION_DROP",
+                    severity=Severity.CRITICAL,
+                    store_id=store_id,
+                    zone_id=None,
+                    detected_at=now,
+                    suggested_action="Review floor staff positioning and zone signage",
+                    details={
+                        "today_rate": round(today_rate, 4),
+                        "seven_day_avg": round(seven_day_avg, 4),
+                        "drop_pct": round(drop_pct, 2)
+                    }
+                ))
+            elif today_rate < seven_day_avg * 0.8:
+                drop_pct = ((seven_day_avg - today_rate) / seven_day_avg * 100) if seven_day_avg > 0 else 0
+                anomalies.append(AnomalyItem(
+                    anomaly_type="CONVERSION_DROP",
+                    severity=Severity.WARN,
+                    store_id=store_id,
+                    zone_id=None,
+                    detected_at=now,
+                    suggested_action="Review floor staff positioning and zone signage",
+                    details={
+                        "today_rate": round(today_rate, 4),
+                        "seven_day_avg": round(seven_day_avg, 4),
+                        "drop_pct": round(drop_pct, 2)
+                    }
+                ))
 
     zone_activity_result = await db.execute(
         select(EventRecord.zone_id, func.count(EventRecord.id)).where(
