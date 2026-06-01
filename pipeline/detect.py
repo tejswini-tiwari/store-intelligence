@@ -27,14 +27,15 @@ def load_model(model_path: str) -> YOLO:
     return model
 
 
-def load_store_layout(layout_path: str, store_id: str) -> dict:
+def load_store_layout(layout_path: str, store_id: str, camera_id: str) -> dict:
     with open(layout_path, 'r') as f:
         layout = json.load(f)
 
-    store_data = layout["stores"][store_id]
-    entry_threshold_y = store_data["entry_threshold_y"]
-    zone_polygons = store_data["zones"]
-    open_hours = {"open": "09:00", "close": "21:00"}
+    store_data = layout.get("stores", {}).get(store_id, {})
+    camera_data = store_data.get("cameras", {}).get(camera_id, {})
+    open_hours = store_data.get("open_hours", {"open": "09:00", "close": "21:00"})
+    entry_threshold_y = camera_data.get("entry_threshold_y", 540)
+    zone_polygons = camera_data.get("zone_polygons", {})
 
     return {
         "entry_threshold_y": entry_threshold_y,
@@ -308,7 +309,7 @@ def main():
     )
 
     model = load_model(args.model)
-    layout = load_store_layout(args.layout, args.store_id)
+    layout = load_store_layout(args.layout, args.store_id, args.camera_id)
     process_video(args.video, args.store_id, args.camera_id, args.role, model, layout, args.clip_start)
 
 

@@ -4,8 +4,8 @@
 # emit_batch partial failure. Use fixtures for common setup.
 # Cover both happy path and all edge cases from the spec.
 # CHANGES MADE: 22 tests (20 spec + load_store_layout + detect_staff).
-# detect_staff tests use Blue (BGR=[255,0,0], HSV hue=120) as staff
-# color per STAFF_HSV_LOWER/UPPER env defaults (100-130 hue range).
+# detect_staff tests use Black (BGR=[0,0,0], HSV hue=0) as staff
+# color per STAFF_HSV_LOWER/UPPER env defaults (0-180 hue range).
 # detect.py imported directly (ML deps now installed in environment).
 # All tests pass with 70% combined coverage.
 
@@ -195,15 +195,20 @@ def test_load_store_layout(tmp_path):
     layout_file.write_text(json.dumps({
         "stores": {
             "TEST_STORE": {
-                "entry_threshold_y": 150,
-                "zones": {
-                    "SKINCARE": [[10, 20], [30, 20], [30, 40], [10, 40]]
+                "open_hours": {"open": "09:00", "close": "21:00"},
+                "cameras": {
+                    "CAM_TEST_01": {
+                        "entry_threshold_y": 150,
+                        "zone_polygons": {
+                            "SKINCARE": [[10, 20], [30, 20], [30, 40], [10, 40]]
+                        }
+                    }
                 }
             }
         }
     }))
     from pipeline.detect import load_store_layout
-    result = load_store_layout(str(layout_file), "TEST_STORE")
+    result = load_store_layout(str(layout_file), "TEST_STORE", "CAM_TEST_01")
     assert result["entry_threshold_y"] == 150
     assert "SKINCARE" in result["zone_polygons"]
 
@@ -211,12 +216,12 @@ def test_detect_staff():
     import numpy as np
     import cv2
     from pipeline.detect import detect_staff
-    hsv_blue = cv2.cvtColor(np.uint8([[[255, 0, 0]]]), cv2.COLOR_BGR2HSV)[0][0]
-    assert 100 <= hsv_blue[0] <= 130, f"Blue HSV hue={hsv_blue[0]} not in staff range"
+    hsv_black = cv2.cvtColor(np.uint8([[[0, 0, 0]]]), cv2.COLOR_BGR2HSV)[0][0]
+    assert hsv_black[1] == 0, f"Black HSV sat={hsv_black[1]} should be 0"
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    frame[10:50, 10:50] = [255, 0, 0]
+    frame[10:50, 10:50] = [0, 0, 0]
     assert detect_staff(frame, (10, 10, 50, 50)) is True, \
-        "Blue (staff vest) should be detected"
+        "Black (staff t-shirt) should be detected"
     hsv_green = cv2.cvtColor(np.uint8([[[0, 255, 0]]]), cv2.COLOR_BGR2HSV)[0][0]
     frame2 = np.zeros((100, 100, 3), dtype=np.uint8)
     frame2[10:50, 10:50] = [0, 255, 0]
