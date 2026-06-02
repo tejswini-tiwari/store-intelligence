@@ -118,9 +118,20 @@ async def get_anomalies(
     """
     anomalies = []
     now = datetime.now(timezone.utc)
-    ten_minutes_ago = now - timedelta(minutes=10)
-    thirty_minutes_ago = now - timedelta(minutes=30)
     conv_window = get_conversion_window_minutes()
+
+    time_window_start, time_window_end = None, None
+    if METRIC_WINDOW in ("today", "last24h"):
+        time_window_start, time_window_end, _ = await get_metric_time_filter(store_id, db)
+
+    ref_now_result = await db.execute(
+        select(func.max(EventRecord.timestamp)).where(
+            EventRecord.store_id == store_id
+        )
+    )
+    ref_now = ref_now_result.scalar() or now
+    ten_minutes_ago = ref_now - timedelta(minutes=10)
+    thirty_minutes_ago = ref_now - timedelta(minutes=30)
 
     latest_queue_result = await db.execute(
         select(EventRecord.queue_depth, EventRecord.timestamp).where(
@@ -129,7 +140,7 @@ async def get_anomalies(
                 EventRecord.event_type == "BILLING_QUEUE_JOIN",
                 EventRecord.is_staff == False,
                 EventRecord.timestamp >= ten_minutes_ago,
-                EventRecord.timestamp <= now
+                EventRecord.timestamp <= ref_now
             )
         ).order_by(EventRecord.timestamp.desc()).limit(1)
     )
@@ -144,7 +155,7 @@ async def get_anomalies(
                     severity=Severity.CRITICAL,
                     store_id=store_id,
                     zone_id=None,
-                    detected_at=now,
+                    detected_at=ref_now,
                     suggested_action="Deploy additional billing staff immediately",
                     details={"current_queue_depth": queue_depth}
                 ))
@@ -154,7 +165,7 @@ async def get_anomalies(
                     severity=Severity.WARN,
                     store_id=store_id,
                     zone_id=None,
-                    detected_at=now,
+                    detected_at=ref_now,
                     suggested_action="Deploy additional billing staff immediately",
                     details={"current_queue_depth": queue_depth}
                 ))
@@ -181,7 +192,7 @@ async def get_anomalies(
                     severity=Severity.CRITICAL,
                     store_id=store_id,
                     zone_id=None,
-                    detected_at=now,
+                    detected_at=ref_now,
                     suggested_action="Review floor staff positioning and zone signage",
                     details={
                         "today_rate": round(today_rate, 4),
@@ -196,7 +207,7 @@ async def get_anomalies(
                     severity=Severity.WARN,
                     store_id=store_id,
                     zone_id=None,
-                    detected_at=now,
+                    detected_at=ref_now,
                     suggested_action="Review floor staff positioning and zone signage",
                     details={
                         "today_rate": round(today_rate, 4),
@@ -212,7 +223,7 @@ async def get_anomalies(
                 EventRecord.event_type == "ZONE_ENTER",
                 EventRecord.is_staff == False,
                 EventRecord.timestamp >= thirty_minutes_ago,
-                EventRecord.timestamp <= now
+                EventRecord.timestamp <= ref_now
             )
         ).group_by(EventRecord.zone_id)
     )
@@ -232,14 +243,25 @@ async def get_anomalies(
 
     for zone_id in all_zones:
         if zone_id != "BILLING" and zone_id not in active_zones_in_window:
+            inactive_since_result = await db.execute(
+                select(func.max(EventRecord.timestamp)).where(
+                    and_(
+                        EventRecord.store_id == store_id,
+                        EventRecord.event_type == "ZONE_ENTER",
+                        EventRecord.zone_id == zone_id
+                    )
+                )
+            )
+            last_activity = inactive_since_result.scalar()
+            minutes_since = int((ref_now - last_activity).total_seconds() / 60) if last_activity else 30
             anomalies.append(AnomalyItem(
                 anomaly_type="DEAD_ZONE",
                 severity=Severity.INFO,
                 store_id=store_id,
                 zone_id=zone_id,
-                detected_at=now,
+                detected_at=ref_now,
                 suggested_action=f"Check camera feed and foot traffic for zone {zone_id}",
-                details={"zone_id": zone_id, "minutes_since_activity": 30}
+                details={"zone_id": zone_id, "minutes_since_activity": minutes_since}
             ))
 
     return anomalies
