@@ -105,7 +105,7 @@ def process_video(video_path: str, store_id: str,
     if fps == 0:
         fps = 15.0
 
-    byte_tracker = ByteTrack(track_thresh=0.45, track_buffer=30, match_thresh=0.8)
+    byte_tracker = ByteTrack(track_activation_threshold=0.45, lost_track_buffer=30, minimum_matching_threshold=0.8)
 
     tracker = VisitorTracker(
         reentry_window_seconds=int(os.getenv("REENTRY_WINDOW_SECONDS", "30")),
@@ -154,8 +154,8 @@ def process_video(video_path: str, store_id: str,
 
         for det in tracked:
             x1, y1, x2, y2 = det[0]
-            track_id = det[4]
-            confidence = det[5] if len(det) > 5 else det[2]
+            track_id = int(det[4])
+            confidence = float(det[2])
 
             if confidence < 0.45:
                 logging.debug(f"Low confidence detection: {confidence:.2f} for track {track_id}")

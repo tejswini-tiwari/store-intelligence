@@ -19,3 +19,4 @@ torchreid>=0.2.5
 rich>=13.7.0
 pandas>=2.2.0
 pytz>=2024.1
+python-dotenv>=1.0.0

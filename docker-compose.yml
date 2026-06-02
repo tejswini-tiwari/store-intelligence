@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   api:
     build: .
@@ -8,6 +7,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://retail:retail@db:5432/storedb
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
+      - METRIC_WINDOW=all
+      - CONVERSION_WINDOW_MINUTES=5
     depends_on:
       db:
         condition: service_healthy
