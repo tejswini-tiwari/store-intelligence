@@ -68,8 +68,8 @@ def detect_staff(frame: np.ndarray, bbox: tuple) -> bool:
 
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
 
-    lower_str = os.getenv("STAFF_HSV_LOWER", "100,50,50")
-    upper_str = os.getenv("STAFF_HSV_UPPER", "130,255,255")
+    lower_str = os.getenv("STAFF_HSV_LOWER", "0,0,0")
+    upper_str = os.getenv("STAFF_HSV_UPPER", "180,255,50")
     lower = tuple(map(int, lower_str.split(',')))
     upper = tuple(map(int, upper_str.split(',')))
 
@@ -198,6 +198,19 @@ def process_video(video_path: str, store_id: str,
                         total_events += 1
                     elif direction == "EXIT":
                         visitor_id_closed = tracker.close_session(track_id, time.time())
+                        billing_joined = tracker.exited_tracks.get(visitor_id_closed, {}).get('billing_visited', False) if visitor_id_closed else False
+                        if billing_joined:
+                            emit_event({
+                                "store_id": store_id,
+                                "camera_id": camera_id,
+                                "visitor_id": visitor_id_closed or visitor_id,
+                                "event_type": "BILLING_QUEUE_ABANDON",
+                                "timestamp": timestamp,
+                                "is_staff": is_staff,
+                                "confidence": confidence,
+                                "zone_id": None
+                            })
+                            total_events += 1
                         emit_event({
                             "store_id": store_id,
                             "camera_id": camera_id,
@@ -278,6 +291,10 @@ def process_video(video_path: str, store_id: str,
                         "metadata": {"queue_depth": queue_depth}
                     })
                     total_events += 1
+
+            billing_visitors = tracker.active_tracks.get(track_id, {}).get('billing_joined', False)
+            if is_billing_cam and not billing_visitors and current_zone and current_zone.upper() == "BILLING":
+                tracker.active_tracks[track_id]['billing_joined'] = True
 
         if frame_count % 100 == 0:
             tracker.cleanup_expired_exits(time.time())

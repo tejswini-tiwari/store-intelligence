@@ -67,7 +67,7 @@ for clip_name, config in cameras.items():
     print(f'  Clip:   {clip_start}')
 
     result = subprocess.run([
-        sys.executable, 'pipeline/detect.py',
+        '$PYTHON_CMD', 'pipeline/detect.py',
         '--video', clip_path,
         '--store-id', store_id,
         '--camera-id', camera_id,

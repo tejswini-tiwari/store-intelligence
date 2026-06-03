@@ -1,5 +1,5 @@
 {
-  "_comment": "Polygons are per-camera pixel coords on a 1920x1080 frame, to be refined using data/frames/. Zone vertices are [x,y] lists.",
+  "_comment": "Polygons are per-camera pixel coords on a 1920x1080 frame. Zone vertices are [x,y] lists.",
   "stores": {
     "ST1008": {
       "open_hours": {
@@ -63,6 +63,39 @@
             "NAIL_FRAGRANCE": [[1320, 540], [1600, 540], [1600, 740], [1320, 740]],
             "MAKEUP_UNIT": [[1620, 540], [1900, 540], [1900, 740], [1620, 740]],
             "PMU": [[100, 760], [1900, 760], [1900, 1060], [100, 1060]]
+          }
+        }
+      }
+    },
+    "ST2008": {
+      "open_hours": {
+        "open": "10:00",
+        "close": "21:00"
+      },
+      "cameras": {
+        "CAM_ENTRY_01": {
+          "entry_threshold_y": 540,
+          "zone_polygons": {}
+        },
+        "CAM_ENTRY_02": {
+          "entry_threshold_y": 540,
+          "zone_polygons": {}
+        },
+        "CAM_BILLING_01": {
+          "entry_threshold_y": 0,
+          "zone_polygons": {
+            "BILLING": [[600, 400], [1200, 400], [1200, 700], [600, 700]]
+          }
+        },
+        "CAM_FLOOR_01": {
+          "entry_threshold_y": 0,
+          "zone_polygons": {
+            "PURPLLE_MUM_1076_Z01": [[100, 100], [600, 100], [600, 400], [100, 400]],
+            "PURPLLE_MUM_1076_Z02": [[620, 100], [1100, 100], [1100, 400], [620, 400]],
+            "PURPLLE_MUM_1076_Z03": [[1120, 100], [1800, 100], [1800, 400], [1120, 400]],
+            "PURPLLE_MUM_1076_Z04": [[100, 420], [600, 420], [600, 700], [100, 700]],
+            "PURPLLE_MUM_1076_Z05": [[620, 420], [1100, 420], [1100, 700], [620, 700]],
+            "PURPLLE_MUM_1076_Z06": [[1120, 420], [1800, 420], [1800, 700], [1120, 700]]
           }
         }
       }

@@ -29,11 +29,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 REFRESH_RATE = 2
 
 STORE_IDS = [
-    "STORE_BLR_001",
-    "STORE_BLR_002",
-    "STORE_MUM_001",
-    "STORE_DEL_001",
-    "STORE_HYD_001",
+    "ST1008",
+    "ST2008",
 ]
 
 

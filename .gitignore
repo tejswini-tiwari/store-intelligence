@@ -9,3 +9,13 @@ __pycache__/
 .coverage.*
 htmlcov/
 *.mp4
+*.avi
+*.mkv
+data/clips/
+data/*.csv
+data/*.xlsx
+data/*.jsonl
+.env
+*.egg-info/
+dist/
+build/

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+test_artifacts/
+*.db
+.coverage
+htmlcov/
+*.mp4
+data/output/
+.env
+.venv/
+venv/

@@ -31,35 +31,21 @@ class TestISTtoUTC:
 
 class TestPOSLoader:
     @pytest.mark.asyncio
-    async def test_basket_summing(self):
+    async def test_basket_value_per_order(self):
         import pandas as pd
         from io import StringIO
 
-        csv_data = """order_id,invoice_number,order_date,order_time,store_id,store_name,total_amount
-1,INV001,10-04-2026,16:55:36,ST1008,Brigade_Bangalore,100.0
-2,INV001,10-04-2026,16:55:36,ST1008,Brigade_Bangalore,250.0
-3,INV002,10-04-2026,19:21:55,ST1008,Brigade_Bangalore,75.50
-4,INV002,10-04-2026,19:21:55,ST1008,Brigade_Bangalore,199.99
-5,INV002,10-04-2026,19:21:55,ST1008,Brigade_Bangalore,49.51"""
+        csv_data = """order_id,order_date,order_time,store_id,product_id,brand_name,total_amount
+1,10-04-2026,16:55:36,ST1008,399945,Faces Canada,302.33
+2,10-04-2026,16:55:36,ST1008,353621,Faces Canada,491.77
+3,10-04-2026,12:42:18,ST1008,407887,Purplle,1
+4,10-04-2026,12:42:18,ST1008,384974,Faces Canada,397.38"""
 
         df = pd.read_csv(StringIO(csv_data))
-        grouped = (
-            df.groupby("invoice_number", sort=False)
-            .agg(
-                store_id=("store_id", "first"),
-                basket_value_inr=("total_amount", "sum"),
-                order_date=("order_date", "first"),
-                order_time=("order_time", "first"),
-            )
-            .reset_index()
-        )
-
-        inv001 = grouped[grouped["invoice_number"] == "INV001"].iloc[0]
-        inv002 = grouped[grouped["invoice_number"] == "INV002"].iloc[0]
-
-        assert inv001["basket_value_inr"] == 350.0
-        assert inv002["basket_value_inr"] == 325.0
-        assert len(grouped) == 2
+        assert len(df) == 4
+        assert df.iloc[0]["total_amount"] == 302.33
+        assert df.iloc[2]["order_id"] == 3
+        assert df.iloc[2]["store_id"] == "ST1008"
 
     @pytest.mark.asyncio
     async def test_utc_timestamp_conversion(self):

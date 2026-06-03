@@ -1,32 +1,50 @@
 {
-  "Front_Gate.mp4": {
+  "Store 1/entry.mp4": {
     "store_id": "ST1008",
     "camera_id": "CAM_ENTRY_01",
     "role": "entry",
     "clip_start": "2026-04-10T20:09:00+05:30"
   },
-  "Cash_Counter_top_view.mp4": {
+  "Store 1/billing.mp4": {
     "store_id": "ST1008",
     "camera_id": "CAM_BILLING_01",
     "role": "billing",
     "clip_start": "2026-04-10T20:09:00+05:30"
   },
-  "Left_part_of_the_shop_with_cash_counter.mp4": {
+  "Store 1/zone1.mp4": {
     "store_id": "ST1008",
     "camera_id": "CAM_FLOOR_01",
     "role": "floor",
     "clip_start": "2026-04-10T20:09:00+05:30"
   },
-  "Right_part_of_the_shop_with_cash_counter.mp4": {
+  "Store 1/zone2.mp4": {
     "store_id": "ST1008",
     "camera_id": "CAM_FLOOR_02",
     "role": "floor",
     "clip_start": "2026-04-10T20:09:00+05:30"
   },
-  "Store_Room.mp4": {
-    "store_id": "ST1008",
-    "camera_id": "CAM_STOREROOM_01",
-    "role": "exclude",
-    "clip_start": "2026-04-10T20:09:00+05:30"
+  "Store 2/entry 1.mp4": {
+    "store_id": "ST2008",
+    "camera_id": "CAM_ENTRY_01",
+    "role": "entry",
+    "clip_start": "2026-03-08T18:10:00+05:30"
+  },
+  "Store 2/entry 2.mp4": {
+    "store_id": "ST2008",
+    "camera_id": "CAM_ENTRY_02",
+    "role": "entry",
+    "clip_start": "2026-03-08T18:10:00+05:30"
+  },
+  "Store 2/zone.mp4": {
+    "store_id": "ST2008",
+    "camera_id": "CAM_FLOOR_01",
+    "role": "floor",
+    "clip_start": "2026-03-08T18:10:00+05:30"
+  },
+  "Store 2/billing_area.mp4": {
+    "store_id": "ST2008",
+    "camera_id": "CAM_BILLING_01",
+    "role": "billing",
+    "clip_start": "2026-03-08T18:10:00+05:30"
   }
 }

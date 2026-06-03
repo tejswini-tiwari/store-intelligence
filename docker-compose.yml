@@ -51,5 +51,26 @@ services:
       - redis
       - api
 
+  pipeline:
+    build: .
+    command: bash -c "cd /app && bash pipeline/run.sh || true"
+    environment:
+      - API_URL=http://api:8000
+      - REDIS_URL=redis://redis:6379
+      - YOLO_MODEL=yolov8m.pt
+      - STAFF_HSV_LOWER=0,0,0
+      - STAFF_HSV_UPPER=180,255,50
+      - REENTRY_WINDOW_SECONDS=30
+      - REENTRY_IOU_THRESHOLD=0.4
+      - METRIC_WINDOW=all
+      - CONVERSION_WINDOW_MINUTES=5
+    volumes:
+      - ./data/clips:/app/data/clips:ro
+      - ./data/store_layout.json:/app/data/store_layout.json:ro
+      - ./data/cameras.json:/app/data/cameras.json:ro
+    depends_on:
+      - api
+    restart: "no"
+
 volumes:
   postgres_data:

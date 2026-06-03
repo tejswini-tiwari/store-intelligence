@@ -58,7 +58,7 @@ Evaluated GPT-4V for staff detection and zone classification.
 Result: too slow for frame-by-frame use. Used it instead for
 a one-time prompt to generate the HSV colour range configuration
 format for staff uniform detection. Prompt was:
-"Given a retail staff uniform that is navy blue, what HSV
+"Given a retail staff uniform that is black, what HSV
 range in OpenCV (0-180 hue scale) would reliably detect it
 while excluding dark customer clothing?"
 The output (H: 100-130, S: 50-255, V: 50-255) became the

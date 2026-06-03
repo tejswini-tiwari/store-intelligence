@@ -150,6 +150,7 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_ABANDON",
                 EventRecord.is_staff == False,
+                *time_filter
             )
         )
     )
@@ -161,6 +162,7 @@ async def get_metrics(
                 EventRecord.store_id == store_id,
                 EventRecord.event_type == "BILLING_QUEUE_JOIN",
                 EventRecord.is_staff == False,
+                *time_filter
             )
         )
     )

@@ -130,6 +130,10 @@ async def get_anomalies(
         )
     )
     ref_now = ref_now_result.scalar() or now
+    if ref_now.tzinfo is None:
+        ref_now = ref_now.replace(tzinfo=timezone.utc)
+    if ref_now < now - timedelta(minutes=30):
+        ref_now = now
     ten_minutes_ago = ref_now - timedelta(minutes=10)
     thirty_minutes_ago = ref_now - timedelta(minutes=30)
 
@@ -223,7 +227,7 @@ async def get_anomalies(
                 EventRecord.event_type == "ZONE_ENTER",
                 EventRecord.is_staff == False,
                 EventRecord.timestamp >= thirty_minutes_ago,
-                EventRecord.timestamp <= ref_now
+                EventRecord.timestamp < ref_now
             )
         ).group_by(EventRecord.zone_id)
     )
@@ -253,7 +257,11 @@ async def get_anomalies(
                 )
             )
             last_activity = inactive_since_result.scalar()
+            if last_activity and last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
             minutes_since = int((ref_now - last_activity).total_seconds() / 60) if last_activity else 30
+            if minutes_since < 30:
+                continue
             anomalies.append(AnomalyItem(
                 anomaly_type="DEAD_ZONE",
                 severity=Severity.INFO,

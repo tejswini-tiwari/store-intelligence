@@ -52,10 +52,10 @@ class VisitorTracker:
                         'last_seen': current_time,
                         'zone': None,
                         'zone_enter_time': None,
-                        'session_seq': self.active_tracks[track_id]['session_seq'] if track_id in self.active_tracks else 0,
-                        'is_active': True
+                        'session_seq': 0,
+                        'is_active': True,
+                        'billing_visited': False
                     }
-                    self.active_tracks[track_id]['session_seq'] = self.active_tracks[track_id].get('session_seq', 0)
                     return vid, True
 
         new_vid = 'VIS_' + uuid.uuid4().hex[:6]
@@ -66,7 +66,8 @@ class VisitorTracker:
             'zone': None,
             'zone_enter_time': None,
             'session_seq': 0,
-            'is_active': True
+            'is_active': True,
+            'billing_visited': False
         }
         return new_vid, False
 
@@ -75,10 +76,12 @@ class VisitorTracker:
             return None
         visitor_id = self.active_tracks[track_id]['visitor_id']
         bbox = self.active_tracks[track_id]['bbox']
+        billing_visited = self.active_tracks[track_id].get('billing_visited', False)
         del self.active_tracks[track_id]
         self.exited_tracks[visitor_id] = {
             'bbox': bbox,
-            'exit_time': current_time
+            'exit_time': current_time,
+            'billing_visited': billing_visited
         }
         return visitor_id
 

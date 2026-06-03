@@ -1,12 +1,11 @@
-# PROMPT: Build POS CSV loader per AGENTS.md real-dataset spec:
-# - Read data/pos_raw.csv with pandas (line-item export, many columns ignored)
-# - Group by invoice_number -> one transaction per invoice
-# - transaction_id=invoice_number, store_id=as-is, basket_value_inr=sum(total_amount)
-# - timestamp=order_date+order_time Asia/Kolkata -> UTC ISO-8601 Z
-# - Insert into POSTransaction via app/database.py async engine, skip duplicates
-# - CLI: python pipeline/load_pos.py --csv data/pos_raw.csv
-# - Print: line items read, unique transactions inserted, min/max timestamp, total basket
-# CHANGES MADE: loader + CLI with idempotent upsert, IST->UTC conversion via pytz.
+# POS CSV loader for the real Purplle dataset.
+# Reads data/POS - sample transactionsb1e826f.csv (line-item export).
+# Each order_id = one transaction (no multi-line invoices to group).
+# transaction_id = order_id, store_id = as-is, basket_value_inr = total_amount (single row)
+# timestamp = order_date+order_time Asia/Kolkata -> UTC ISO-8601 Z
+# Insert into POSTransaction via app/database.py async engine, skip duplicates.
+# CLI: python pipeline/load_pos.py --csv "data/POS - sample transactionsb1e826f.csv"
+# Print: rows read, transactions inserted, min/max timestamp, total basket.
 
 import argparse
 import asyncio
@@ -33,36 +32,25 @@ def ist_to_utc(date_str: str, time_str: str) -> datetime:
 async def load_pos(csv_path: str) -> dict:
     df = pd.read_csv(csv_path)
 
-    required = ["invoice_number", "store_id", "order_date", "order_time", "total_amount"]
+    required = ["order_id", "store_id", "order_date", "order_time", "total_amount"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
 
-    total_line_items = len(df)
+    total_rows = len(df)
 
-    grouped = (
-        df.groupby("invoice_number", sort=False)
-        .agg(
-            store_id=("store_id", "first"),
-            basket_value_inr=("total_amount", "sum"),
-            order_date=("order_date", "first"),
-            order_time=("order_time", "first"),
-        )
-        .reset_index()
-    )
-
+    timestamps = []
     inserted = 0
     skipped = 0
-    timestamps = []
 
     async with AsyncSessionLocal() as session:
-        for _, row in grouped.iterrows():
+        for _, row in df.iterrows():
             timestamp_utc = ist_to_utc(row["order_date"], row["order_time"])
 
             tx = POSTransaction(
-                transaction_id=row["invoice_number"],
+                transaction_id=str(row["order_id"]),
                 store_id=row["store_id"],
-                basket_value_inr=row["basket_value_inr"],
+                basket_value_inr=row["total_amount"],
                 timestamp=timestamp_utc,
             )
             session.add(tx)
@@ -74,12 +62,12 @@ async def load_pos(csv_path: str) -> dict:
                 await session.rollback()
                 skipped += 1
 
-    total_basket = grouped["basket_value_inr"].sum()
+    total_basket = df["total_amount"].sum()
     min_ts = min(timestamps) if timestamps else None
     max_ts = max(timestamps) if timestamps else None
 
     return {
-        "line_items": total_line_items,
+        "rows": total_rows,
         "inserted": inserted,
         "skipped": skipped,
         "total_basket": total_basket,
@@ -95,12 +83,13 @@ async def main():
 
     result = await load_pos(args.csv)
 
-    print(f"Line items read: {result['line_items']}")
-    print(f"Unique transactions inserted: {result['inserted']}")
+    print(f"Rows read: {result['rows']}")
+    print(f"Transactions inserted: {result['inserted']}")
+    print(f"Skipped (duplicates): {result['skipped']}")
     if result["min_timestamp"]:
-        print(f"Min transaction timestamp (UTC): {result['min_timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')}")
+        print(f"Min timestamp (UTC): {result['min_timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')}")
     if result["max_timestamp"]:
-        print(f"Max transaction timestamp (UTC): {result['max_timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')}")
+        print(f"Max timestamp (UTC): {result['max_timestamp'].strftime('%Y-%m-%dT%H:%M:%SZ')}")
     print(f"Total basket value (INR): {result['total_basket']:.2f}")
 
 

@@ -118,13 +118,18 @@ store-intelligence/
 │   ├── metrics.py     # Real-time store metrics
 │   ├── funnel.py      # Conversion funnel
 │   ├── anomalies.py   # Anomaly detection
+│   ├── heatmap.py     # Zone heatmap (0-100 normalised scores)
+│   ├── events.py      # Paginated event list endpoint
 │   └── health.py      # Health check endpoint
 ├── dashboard/
 │   └── live.py        # Rich terminal live dashboard
 ├── tests/
 │   ├── test_pipeline.py   # 22 pipeline tests
 │   ├── test_metrics.py    # 12 API tests
-│   └── test_anomalies.py  # 9 anomaly tests
+│   ├── test_anomalies.py  # 9 anomaly tests
+│   ├── test_heatmap.py    # heatmap normalisation + edge cases
+│   ├── test_conversion.py # 5-min window correlation tests
+│   └── test_pos_loader.py # IST→UTC conversion tests
 ├── docs/
 │   ├── DESIGN.md      # Architecture and AI decisions
 │   └── CHOICES.md     # 3 key decisions with rationale
@@ -142,8 +147,8 @@ store-intelligence/
 | REDIS_URL | redis://localhost:6379 | Redis connection |
 | API_URL | http://localhost:8000 | API for pipeline to post events |
 | YOLO_MODEL | yolov8m.pt | YOLOv8 model variant |
-| STAFF_HSV_LOWER | 100,50,50 | HSV lower bound for staff uniform |
-| STAFF_HSV_UPPER | 130,255,255 | HSV upper bound for staff uniform |
+| STAFF_HSV_LOWER | 0,0,0 | HSV lower bound for staff uniform (black) |
+| STAFF_HSV_UPPER | 180,255,50 | HSV upper bound for staff uniform (black) |
 | REENTRY_WINDOW_SECONDS | 30 | Re-entry detection window |
 | REENTRY_IOU_THRESHOLD | 0.4 | IoU threshold for re-entry match |
 

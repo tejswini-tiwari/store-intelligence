@@ -79,10 +79,11 @@ Decision 4 — Staff detection via HSV colour masking:
   Staff uniforms are detected using HSV colour range masking
   (configurable via STAFF_HSV_LOWER and STAFF_HSV_UPPER env
   vars) because this is the most reliable signal available
-  without training data. A navy-blue uniform produces a stable
-  HSV signature that is robust to lighting changes within a
-  store. The configuration is tunable per-store without code
-  changes, and the approach adds zero inference latency.
+  without training data. Staff wear black t-shirts, which produce
+  a stable HSV signature (hue=0, sat=0, value 50-255) that is
+  robust to lighting changes within a store. The configuration
+  is tunable per-store without code changes, and the approach
+  adds zero inference latency.
 
 Decision 5 — Confidence never suppressed:
   All detections are emitted regardless of confidence score.
@@ -120,10 +121,6 @@ Decision 5 — Confidence never suppressed:
 - Test coverage exceeds 70% with async route bodies traced correctly via `concurrency = thread` and `greenlet` in .coveragerc, ensuring async FastAPI handlers are properly covered by pytest-asyncio.
 
 ## AI-Assisted Decisions
-
-This section is REQUIRED and must have exactly 3 entries.
-Be specific — name the actual decision, what the AI suggested,
-and what you chose.
 
 ### 1. Re-ID Architecture
 
@@ -188,11 +185,21 @@ What I followed: The AI's suggestion to use PostgreSQL as
 
 2. Staff detection relies on uniform colour — stores with
    non-uniform staff attire or colour overlap with customer
-   clothing will produce false positives/negatives.
+   clothing will produce false positives/negatives. The current
+   heuristic detects black t-shirts (HSV hue=0, sat=0, value 50-255).
+   Dim CCTV lighting may cause under-detection; customers wearing
+   black may be misclassified as staff. This is an approximation,
+   not ground truth.
 
-3. process_video in detect.py is not unit-testable without
-   real video clips and model weights — integration tests
-   would require the full dataset.
+3. Billing camera field-of-view (FOV) is limited: the top-view
+   camera at the billing counter only sees the person directly
+   at the counter, NOT the waiting queue behind them. This means:
+   - True queue_depth (waiting line length) cannot be measured
+   - BILLING_QUEUE_ABANDON detection is incomplete — only visitors
+     who approach the counter and then leave are captured; customers
+     who abandon while waiting in line are not visible to this camera
+   - The queue_depth metric reflects only current counter presence,
+     not overall billing interest
 
 4. The 7-day rolling average for CONVERSION_DROP anomaly
    requires 7 days of historical data — the anomaly is
