@@ -4,8 +4,17 @@ from sqlalchemy import select, func, and_
 from app.database import get_db, EventRecord, POSTransaction
 from app.timewindow import get_metric_time_filter, get_conversion_window_minutes
 from datetime import datetime, timezone, timedelta
+from bisect import bisect_left
 
 router = APIRouter()
+
+
+async def _count_distinct_visitors(db, filters):
+    """COUNT(DISTINCT visitor_id) pushed to the DB — no event rows leave SQL."""
+    result = await db.execute(
+        select(func.count(func.distinct(EventRecord.visitor_id))).where(and_(*filters))
+    )
+    return result.scalar() or 0
 
 
 @router.get("/stores/{store_id}/funnel")
@@ -80,80 +89,59 @@ async def get_funnel(
         time_filter.append(EventRecord.timestamp >= start)
         time_filter.append(EventRecord.timestamp <= end)
 
-    pos_time_filter = []
-    if start is not None and end is not None:
-        pos_time_filter.append(POSTransaction.timestamp >= start)
-        pos_time_filter.append(POSTransaction.timestamp <= end)
+    base_filter = [EventRecord.store_id == store_id, EventRecord.is_staff == False, *time_filter]
 
-    all_event_filter = [EventRecord.store_id == store_id, EventRecord.is_staff == False]
-    all_event_filter.extend(time_filter)
+    # STAGE 1-3 — COUNT(DISTINCT visitor_id) per stage runs entirely in SQL.
+    # Same visitor_id across re-entries dedupes automatically (DISTINCT).
+    entry_count = await _count_distinct_visitors(
+        db, [*base_filter, EventRecord.event_type == "ENTRY"]
+    )
+    zone_visit_count = await _count_distinct_visitors(
+        db,
+        [
+            *base_filter,
+            EventRecord.event_type == "ZONE_ENTER",
+            EventRecord.zone_id.isnot(None),
+            EventRecord.zone_id != "",
+            EventRecord.zone_id != "BILLING",
+        ],
+    )
+    billing_queue_count = await _count_distinct_visitors(
+        db, [*base_filter, EventRecord.event_type == "BILLING_QUEUE_JOIN"]
+    )
 
-    events_result = await db.execute(
-        select(EventRecord.visitor_id, EventRecord.event_type, EventRecord.timestamp, EventRecord.zone_id).where(
-            and_(*all_event_filter)
+    # STAGE 4 — purchase correlation. Only the billing-join subset and POS
+    # timestamps leave SQL (a small fraction of total events). Correlate with
+    # bisect over sorted POS timestamps: O(joins · log(pos)) instead of the
+    # previous O(visitors · joins · pos) nested scan.
+    purchase_count = 0
+    if billing_queue_count > 0:
+        joins_result = await db.execute(
+            select(EventRecord.visitor_id, EventRecord.timestamp).where(
+                and_(*base_filter, EventRecord.event_type == "BILLING_QUEUE_JOIN")
+            )
         )
-    )
-    events = events_result.all()
+        billing_joins = joins_result.all()
 
-    visitor_events = {}
-    for visitor_id, event_type, timestamp, zone_id in events:
-        if visitor_id not in visitor_events:
-            visitor_events[visitor_id] = []
-        visitor_events[visitor_id].append((event_type, timestamp, zone_id))
+        pos_filter = [POSTransaction.store_id == store_id]
+        if start is not None and end is not None:
+            pos_filter.append(POSTransaction.timestamp >= start)
+            # widen upper bound by the window so a join near `end` still matches
+            pos_filter.append(POSTransaction.timestamp <= end + timedelta(minutes=conv_window))
+        pos_result = await db.execute(
+            select(POSTransaction.timestamp).where(and_(*pos_filter))
+        )
+        pos_timestamps = sorted(row[0] for row in pos_result.all())
 
-    reentry_visitors = set()
-    for visitor_id, evts in visitor_events.items():
-        event_types = [e[0] for e in evts]
-        if "REENTRY" in event_types:
-            reentry_visitors.add(visitor_id)
-
-    pos_filter = [POSTransaction.store_id == store_id]
-    if pos_time_filter:
-        pos_filter.extend(pos_time_filter)
-    pos_transactions_result = await db.execute(
-        select(POSTransaction.timestamp).where(and_(*pos_filter))
-    )
-    pos_timestamps = [row[0] for row in pos_transactions_result.all()]
-
-    entry_visitors = set()
-    zone_visitors = set()
-    billing_visitors = set()
-    purchase_visitors = set()
-
-    for visitor_id, evts in visitor_events.items():
-        event_types = [e[0] for e in evts]
-        timestamps = [e[1] for e in evts]
-        zone_ids = [e[2] for e in evts]
-
-        if "ENTRY" in event_types:
-            entry_visitors.add(visitor_id)
-
-        has_zone_enter = False
-        for event_type, ts, zone_id in evts:
-            if event_type == "ZONE_ENTER" and zone_id and zone_id != "BILLING":
-                has_zone_enter = True
-                break
-        if has_zone_enter:
-            zone_visitors.add(visitor_id)
-
-        billing_join_timestamps = []
-        for event_type, ts, zone_id in evts:
-            if event_type == "BILLING_QUEUE_JOIN":
-                billing_join_timestamps.append(ts)
-
-        if billing_join_timestamps:
-            billing_visitors.add(visitor_id)
-
-            for join_time in billing_join_timestamps:
-                for pos_time in pos_timestamps:
-                    if join_time <= pos_time <= join_time + timedelta(minutes=conv_window):
-                        purchase_visitors.add(visitor_id)
-                        break
-
-    entry_count = len(entry_visitors)
-    zone_visit_count = len(zone_visitors)
-    billing_queue_count = len(billing_visitors)
-    purchase_count = len(purchase_visitors)
+        window = timedelta(minutes=conv_window)
+        purchase_visitors = set()
+        for visitor_id, join_time in billing_joins:
+            if visitor_id in purchase_visitors:
+                continue
+            idx = bisect_left(pos_timestamps, join_time)
+            if idx < len(pos_timestamps) and pos_timestamps[idx] <= join_time + window:
+                purchase_visitors.add(visitor_id)
+        purchase_count = len(purchase_visitors)
 
     entry_to_zone_dropoff = ((entry_count - zone_visit_count) / entry_count * 100) if entry_count > 0 else 0.0
     zone_to_billing_dropoff = ((zone_visit_count - billing_queue_count) / zone_visit_count * 100) if zone_visit_count > 0 else 0.0
