@@ -194,11 +194,17 @@ store-intelligence/
 
 ## Architecture
 
-CCTV Clips → YOLOv8 Detection → ByteTrack Tracking
-→ VisitorTracker (Re-ID) → emit.py → events.jsonl
-→ POST /events/ingest → SQLite/PostgreSQL
-→ GET /metrics, /funnel, /anomalies
-→ Redis pub/sub → Live Dashboard
+```text
+CCTV clips
+-> YOLOv8 detection
+-> ByteTrack tracking
+-> VisitorTracker / Re-ID
+-> pipeline/emit.py
+-> POST /events/ingest
+-> SQLite/PostgreSQL + Redis
+-> REST API
+-> Web dashboard
+```
 
-See docs/DESIGN.md for full architecture documentation.
-See docs/CHOICES.md for key technical decisions.
+See `docs/DESIGN.md` for full architecture documentation.
+See `docs/CHOICES.md` for key technical decisions.
