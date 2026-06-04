@@ -12,6 +12,7 @@ cd store-intelligence
 cp .env.example .env
 docker compose up -d
 curl http://localhost:8000/health
+open http://localhost:8000/docs on browser to check every API 
 ```
 
 Expected output from health check:
