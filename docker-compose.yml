@@ -20,6 +20,8 @@ services:
     volumes:
       # read-write: /pipeline/process saves uploads to data/inbox and detection reads clips
       - ./data:/app/data
+      - ./yolov8m.pt:/app/yolov8m.pt:ro
+      - ./yolov8n.pt:/app/yolov8n.pt:ro
     healthcheck:
       test: curl -f http://localhost:8000/health || exit 1
       interval: 10s
@@ -79,6 +81,8 @@ services:
       - ./data/clips:/app/data/clips:ro
       - ./data/store_layout.json:/app/data/store_layout.json:ro
       - ./data/cameras.json:/app/data/cameras.json:ro
+      - ./yolov8m.pt:/app/yolov8m.pt:ro
+      - ./yolov8n.pt:/app/yolov8n.pt:ro
     depends_on:
       - api
     restart: "no"
