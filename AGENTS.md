@@ -25,13 +25,28 @@ Follow /store-intelligence/ layout from problem statement exactly.
 ENTRY, EXIT, ZONE_ENTER, ZONE_EXIT, ZONE_DWELL (every 30s),
 BILLING_QUEUE_JOIN, BILLING_QUEUE_ABANDON, REENTRY
 
+## Input Ingestion (live, on-demand)
+Footage is fed to the system at runtime — not only via the one-shot batch script.
+- `POST /pipeline/process` accepts a CCTV clip (multipart upload OR a server-side
+  `video_path`) plus `store_id`, `camera_id`, `role`, `clip_start`. The API runs
+  detection in a background subprocess; emitted events flow into POST /events/ingest
+  and are published to Redis, so the dashboard updates live. Returns 202 + job_id.
+- `GET /pipeline/jobs/{id}` tracks job status (queued/running/done/failed).
+- `pipeline/feed.py` is the CLI client for this endpoint.
+- `store_id` is ALWAYS supplied by the caller feeding the footage — never hardcoded.
+  A brand-new store_id appears automatically once its first event lands.
+- `GET /stores` returns all store_ids seen so far; the dashboard polls it to
+  discover stores dynamically (no STORE_IDS constant anywhere).
+- The legacy batch pass (`pipeline/run.sh`, the `pipeline` compose service) still
+  exists but is now behind the `batch` compose profile so `docker compose up` no
+  longer runs-once-and-exits. Run it explicitly: `docker compose --profile batch up pipeline`.
+
 ## Real Dataset (overrides earlier assumptions)
 
-- Single real store: store_id = "ST1008", store_name "Brigade_Bangalore",
-  city Bangalore. Use "ST1008" as the canonical store_id EVERYWHERE — in emitted
-  events and in the POS loader. There are no other stores.
+- Two real store given for test but later they will ingest multiple cctv footages and will test on it : store_id = "ST1008", store_name "Brigade_Bangalore",
+  city Bangalore. Use "ST1008" as the canonical store_id EVERYWHERE
 
-- 5 CCTV clips live in ./data/clips/ with descriptive filenames. All five cover
+- 4 CCTV clips live in ./data/clips/ with descriptive filenames. All five cover
   the SAME real time window 20:09–20:13 IST on 2026-04-10, from different angles
   in the one store. Camera roles are defined in data/cameras.json, NOT parsed
   from the filename. The roles are:

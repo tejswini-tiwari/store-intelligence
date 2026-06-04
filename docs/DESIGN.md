@@ -94,9 +94,38 @@ Decision 5 — Confidence never suppressed:
   — the north star metric. The spec explicitly requires this
   behaviour.
 
+## Live Input Ingestion
+
+Footage enters the system at runtime, not only through a one-shot batch script.
+`POST /pipeline/process` accepts a CCTV clip — either a multipart upload or a
+`video_path` already on the server — together with the `store_id`, `camera_id`,
+`role`, and `clip_start` the caller chooses. The API persists the clip to
+`data/inbox/`, then launches `pipeline/detect.py` in a background subprocess
+(`asyncio.create_subprocess_exec`) so heavy YOLO inference never blocks the event
+loop. detect.py emits events back into `POST /events/ingest` on the same API,
+which stores them and publishes each one to Redis (`store:{id}:events`). The Rich
+dashboard is subscribed to that channel, so metrics update live as detection runs.
+
+Two deliberate properties:
+- **The caller defines `store_id`.** Nothing is hardcoded. A store_id the system
+  has never seen appears automatically once its first event is ingested.
+- **The dashboard discovers stores dynamically** via `GET /stores` (distinct
+  store_ids with event counts and last-seen timestamps), refreshed every few
+  seconds. An optional `STORE_IDS` env var pins/filters the view.
+
+Detection job state lives in an in-memory registry (`GET /pipeline/jobs/{id}`),
+which is intentionally single-instance; a multi-replica deployment would move it
+to Redis or the database. The legacy batch pass (`pipeline/run.sh`) still exists
+but is gated behind the `batch` compose profile so `docker compose up` no longer
+runs-once-and-exits.
+
 ## API Design
 
-- `GET /health` — Returns 200 if all stores have reported within 10 minutes, 503 if any feed is stale. Key constraint: detects stale camera feeds.
+- `POST /pipeline/process` — Feed a clip for background detection; returns 202 + job_id. Events stream into ingest + Redis. Key constraint: store_id supplied by caller, detection runs out-of-process.
+
+- `GET /stores` — All store_ids the API has seen, newest-active first. Powers dynamic store discovery in the dashboard. Edge case: empty list before any events.
+
+- `GET /health` — Returns 200 with `service: healthy`; `service: degraded` plus a populated `stale_feeds` list when any store has not reported in >10 minutes. Key constraint: detects stale camera feeds without flapping to 503 on historical data.
 
 - `GET /stores` — Returns list of all known stores with their current status. Edge case: stores with zero events are still listed with null metrics.
 

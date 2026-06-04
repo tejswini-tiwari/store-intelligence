@@ -135,6 +135,8 @@ from app.anomalies import router as anomalies_router
 from app.health import router as health_router
 from app.heatmap import router as heatmap_router
 from app.events import router as events_router
+from app.stores import router as stores_router
+from app.jobs import router as jobs_router
 
 app.include_router(ingestion_router)
 app.include_router(metrics_router)
@@ -143,3 +145,5 @@ app.include_router(anomalies_router)
 app.include_router(health_router)
 app.include_router(heatmap_router)
 app.include_router(events_router)
+app.include_router(stores_router)
+app.include_router(jobs_router)

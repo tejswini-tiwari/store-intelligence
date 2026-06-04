@@ -25,37 +25,65 @@ Expected output from health check:
 }
 ```
 
-## Running the Detection Pipeline
+## Feeding Footage (live, on-demand)
+
+You feed CCTV clips to the running API and watch detection results stream onto
+the dashboard in real time. **The store_id is whatever you pass in** — it is not
+hardcoded, and a brand-new store appears on the dashboard automatically once its
+first event lands.
 
 ```bash
-# Place your CCTV clips in data/clips/
-# Name format: STORE_BLR_002_CAM_ENTRY_01.mp4
+# After `docker compose up -d`, feed a clip with the CLI client:
+python pipeline/feed.py \
+  --video "data/clips/Store 1/entry.mp4" \
+  --store-id ST1008 --camera-id CAM_ENTRY_01 --role entry --watch
 
-# Install pipeline dependencies
+# Or call the endpoint directly (multipart upload):
+curl -X POST http://localhost:8000/pipeline/process \
+  -F store_id=ST1008 -F camera_id=CAM_ENTRY_01 -F role=entry \
+  -F video=@"data/clips/Store 1/entry.mp4"
+
+# Track the background detection job:
+curl http://localhost:8000/pipeline/jobs/<job_id>
+```
+
+The API saves the clip, runs `pipeline/detect.py` in the background, and the
+emitted events flow into `POST /events/ingest` (persisted + published to Redis),
+so the live dashboard updates as detection progresses. Events are also written to
+`data/output/events.jsonl`.
+
+### Running detection directly (no API)
+
+```bash
 pip install -r requirements.txt
-
-# Run pipeline against all clips
-bash pipeline/run.sh
-
-# Or run a single clip manually
 python pipeline/detect.py \
-  --video data/clips/STORE_BLR_002_CAM_ENTRY_01.mp4 \
-  --store-id STORE_BLR_002 \
-  --camera-id CAM_ENTRY_01 \
+  --video "data/clips/Store 1/entry.mp4" \
+  --store-id ST1008 --camera-id CAM_ENTRY_01 --role entry \
+  --clip-start 2026-04-10T20:09:00+05:30 \
   --layout data/store_layout.json
 ```
 
-Events are written to: data/output/events.jsonl
-Events are also posted to: http://localhost:8000/events/ingest
+### Legacy batch pass (optional)
+
+A one-shot pass over everything in `data/cameras.json`. It is behind the `batch`
+compose profile so a plain `docker compose up` does not run-once-and-exit:
+
+```bash
+docker compose --profile batch up pipeline   # in Docker
+bash pipeline/run.sh                          # or locally
+```
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| POST | /pipeline/process | Feed a CCTV clip (upload or path) for live detection; returns 202 + job_id |
+| GET | /pipeline/jobs/{id} | Detection job status (queued/running/done/failed) |
+| GET | /stores | All store_ids seen so far (dashboard discovers stores from this) |
 | POST | /events/ingest | Ingest batches of up to 500 events |
 | GET | /stores/{id}/metrics | Real-time store metrics |
 | GET | /stores/{id}/funnel | Conversion funnel with drop-off % |
-| GET | /stores/{id}/heatmap | Zone visit frequency heatmap |
+| GET | /stores/{id}/heatmap | Zone visit frequency heatmap (normalised 0–100) |
 | GET | /stores/{id}/anomalies | Active anomalies with severity |
 | GET | /health | Service health and stale feed detection |
 

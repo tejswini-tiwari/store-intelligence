@@ -9,13 +9,17 @@ services:
       - LOG_LEVEL=INFO
       - METRIC_WINDOW=all
       - CONVERSION_WINDOW_MINUTES=5
+      # API_URL points at itself so background detection can post events back in
+      - API_URL=http://localhost:8000
+      - YOLO_MODEL=yolov8m.pt
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
     volumes:
-      - ./data:/app/data:ro
+      # read-write: /pipeline/process saves uploads to data/inbox and detection reads clips
+      - ./data:/app/data
     healthcheck:
       test: curl -f http://localhost:8000/health || exit 1
       interval: 10s
@@ -53,8 +57,13 @@ services:
     stdin_open: true
     tty: true
 
+  # Optional one-shot batch pass over data/cameras.json. NOT started by a plain
+  # `docker compose up` (it would run once and exit). Run it explicitly with:
+  #   docker compose --profile batch up pipeline
+  # For interactive/live ingestion, feed clips to POST /pipeline/process instead.
   pipeline:
     build: .
+    profiles: ["batch"]
     command: bash -c "cd /app && bash pipeline/run.sh || true"
     environment:
       - API_URL=http://api:8000

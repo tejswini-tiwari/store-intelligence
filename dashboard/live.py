@@ -28,10 +28,9 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 REFRESH_RATE = 2
 
-STORE_IDS = [
-    "ST1008",
-    "ST2008",
-]
+# Stores are discovered dynamically from GET /stores — nothing is hardcoded.
+# Optionally pin/filter to a subset via env STORE_IDS="ST1008,ST2008".
+_STORE_FILTER = [s.strip() for s in os.getenv("STORE_IDS", "").split(",") if s.strip()]
 
 
 class DashboardState:
@@ -39,12 +38,25 @@ class DashboardState:
 
     def __init__(self):
         self.lock = threading.Lock()
+        self.store_ids = list(_STORE_FILTER)  # may start empty → discovered live
         self.metrics = {}
         self.anomalies = {}
         self.last_event = {}
         self.event_counts = {}
         self.connected = True
         self.last_update = datetime.now(timezone.utc)
+
+    def get_store_ids(self) -> list:
+        with self.lock:
+            return list(self.store_ids)
+
+    def set_store_ids(self, store_ids: list):
+        with self.lock:
+            # Honour an explicit filter if one was provided; otherwise take all.
+            if _STORE_FILTER:
+                self.store_ids = [s for s in store_ids if s in _STORE_FILTER] or list(_STORE_FILTER)
+            else:
+                self.store_ids = list(store_ids)
 
     def update_from_event(self, event: dict):
         with self.lock:
@@ -76,13 +88,24 @@ class DashboardState:
 
 def fetch_metrics_loop(state: DashboardState):
     """
-    Background thread. Every 5 seconds fetches fresh metrics
-    and anomalies from the API for all STORE_IDS.
+    Background thread. Every 5 seconds discovers the current set of stores
+    from GET /stores, then fetches fresh metrics and anomalies for each.
     """
     while True:
         try:
             client = httpx.Client(timeout=3.0)
-            for store_id in STORE_IDS:
+
+            # Discover stores dynamically — whoever fed events defines them.
+            try:
+                resp = client.get(f"{API_URL}/stores")
+                if resp.status_code == 200:
+                    discovered = [s["store_id"] for s in resp.json().get("stores", [])]
+                    if discovered:
+                        state.set_store_ids(discovered)
+            except Exception:
+                pass
+
+            for store_id in state.get_store_ids():
                 try:
                     resp = client.get(
                         f"{API_URL}/stores/{store_id}/metrics"
@@ -150,12 +173,17 @@ def build_metrics_table(state: DashboardState) -> Table:
     table.add_column("Events Seen")
 
     with state.lock:
+        store_ids = list(state.store_ids)
         metrics_copy = dict(state.metrics)
         anomalies_copy = dict(state.anomalies)
         last_event_copy = dict(state.last_event)
         event_counts_copy = dict(state.event_counts)
 
-    for store_id in STORE_IDS:
+    if not store_ids:
+        table.add_row("(waiting for events…)", "-", "-", "-", "-", "-", "-", "-")
+        return table
+
+    for store_id in store_ids:
         m = metrics_copy.get(store_id, {})
 
         visitors = m.get("unique_visitors", "-")
@@ -211,6 +239,7 @@ def build_metrics_table(state: DashboardState) -> Table:
 def build_anomalies_panel(state: DashboardState) -> Panel:
     """Build a Rich Panel listing all active anomalies."""
     with state.lock:
+        store_ids = list(state.store_ids)
         anomalies_copy = dict(state.anomalies)
         connected = state.connected
 
@@ -221,7 +250,7 @@ def build_anomalies_panel(state: DashboardState) -> Panel:
         lines.append("")
 
     has_anomalies = False
-    for store_id in STORE_IDS:
+    for store_id in store_ids:
         anomalies = anomalies_copy.get(store_id, [])
         for anomaly in anomalies:
             severity = anomaly.get("severity", "INFO")
