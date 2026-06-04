@@ -26,7 +26,24 @@ load_dotenv()
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-REFRESH_RATE = 2
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+REFRESH_RATE = max(0.5, _env_float("DASHBOARD_REFRESH_RATE", 1.0))
+DASHBOARD_SCREEN = _env_bool("DASHBOARD_SCREEN", False)
 
 # Stores are discovered dynamically from GET /stores — nothing is hardcoded.
 # Optionally pin/filter to a subset via env STORE_IDS="ST1008,ST2008".
@@ -328,6 +345,7 @@ def main():
     print("Starting Store Intelligence Live Dashboard...")
     print(f"API: {API_URL}")
     print(f"Redis: {REDIS_URL}")
+    print(f"Screen mode: {'full-screen' if DASHBOARD_SCREEN else 'inline'}")
     print()
 
     state = DashboardState()
@@ -346,10 +364,16 @@ def main():
         with Live(
             build_layout(state),
             refresh_per_second=REFRESH_RATE,
-            screen=True,
+            screen=DASHBOARD_SCREEN,
+            redirect_stdout=False,
+            redirect_stderr=False,
         ) as live:
             while True:
                 live.update(build_layout(state))
                 time.sleep(1 / REFRESH_RATE)
     except KeyboardInterrupt:
         print("\nDashboard stopped.")
+
+
+if __name__ == "__main__":
+    main()

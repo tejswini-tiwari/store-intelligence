@@ -29,6 +29,16 @@ app = FastAPI(
 )
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Store Intelligence API",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
     """
