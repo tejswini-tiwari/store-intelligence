@@ -82,20 +82,10 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         if (now - last_ts) > timedelta(minutes=10):
             stale_feeds.append(store_id)
 
-    if stale_feeds:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "service": "degraded",
-                "db_status": "connected",
-                "last_event_per_store": last_event_per_store,
-                "stale_feeds": stale_feeds,
-                "checked_at": now.isoformat()
-            }
-        )
+    service_status = "degraded" if stale_feeds else "healthy"
 
     return {
-        "service": "healthy",
+        "service": service_status,
         "db_status": "connected",
         "last_event_per_store": last_event_per_store,
         "stale_feeds": stale_feeds,

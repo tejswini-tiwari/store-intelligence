@@ -5,7 +5,7 @@ RUN useradd -m -u 1000 appuser
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip uninstall -y opencv-python || true && \
-    pip install --no-cache-dir "opencv-python-headless>=4.9.0"
+    pip install --force-reinstall --no-cache-dir "opencv-python-headless>=4.9.0"
 COPY . .
 RUN chown -R appuser:appuser /app
 USER appuser
