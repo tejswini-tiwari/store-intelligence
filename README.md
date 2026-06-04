@@ -7,7 +7,7 @@ CCTV footage from retail stores is processed through a YOLOv8 detection pipeline
 ## Quick Start (5 commands)
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/tejswini-tiwari/Purplle-Tech-Hackathon-26-Solution
 cd store-intelligence
 cp .env.example .env
 docker compose up -d
