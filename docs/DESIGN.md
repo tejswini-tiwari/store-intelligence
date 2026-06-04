@@ -7,25 +7,37 @@ The Store Intelligence Pipeline transforms raw CCTV footage from retail stores i
 ## Component Diagram
 
 ```
+   Feed footage (you choose the store_id)
+   pipeline/feed.py  or  curl -F video=@clip.mp4
+              │
+              ▼
+┌─────────────────────────┐     ┌──────────────────┐
+│  Intelligence API       │     │  Detection Layer │
+│  POST /pipeline/process │────▶│  pipeline/       │
+│  saves clip to          │ bg  │  detect.py       │
+│  data/inbox, spawns ────┼────▶│  tracker.py      │
+│  detection subprocess   │     │  emit.py         │
+└─────────────────────────┘     └────────┬─────────┘
+              ▲                           │ POST /events/ingest
+              │ GET /stores, /metrics …   ▼
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  CCTV Clips     │────▶│  Detection Layer │────▶│  Event Stream   │
-│  (MP4, 1080p    │     │  pipeline/       │     │  events.jsonl   │
-│   15fps)        │     │  detect.py       │     │  + API ingest   │
-└─────────────────┘     │  tracker.py      │     └────────┬────────┘
-                        │  emit.py         │              │
-                        └──────────────────┘              ▼
-                                                 ┌─────────────────┐
-┌─────────────────┐     ┌──────────────────┐     │  Intelligence   │
-│  Live Dashboard │◀────│  Redis Pub/Sub   │◀────│  API            │
-│  dashboard/     │     │  store:{id}:     │     │  app/           │
-│  live.py        │     │  events          │     │  FastAPI        │
+│  Live Dashboard │◀────│  Redis Pub/Sub   │◀────│  Intelligence   │
+│  dashboard/     │     │  store:{id}:     │     │  API + DB       │
+│  live.py        │     │  events          │     │  app/ FastAPI   │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
+Two ways footage enters: (a) **live** — `POST /pipeline/process` accepts an
+uploaded clip and runs detection in a background subprocess; (b) **batch** —
+`pipeline/run.sh` over `data/cameras.json`, now behind the `batch` compose
+profile. Both paths funnel through the same `POST /events/ingest`.
+
 ## Data Flow
 
-Describe the journey of ONE visitor event from frame to API:
+The journey of ONE visitor event from frame to dashboard:
 
+Step 0 — Input: a caller feeds a clip to POST /pipeline/process
+  with a chosen store_id; the API spawns detect.py against it.
 Step 1 — Frame capture: YOLOv8 detects person bounding box
   in frame N of the entry camera clip.
 Step 2 — Tracking: ByteTrack assigns track_id. VisitorTracker
@@ -127,13 +139,15 @@ runs-once-and-exits.
 
 - `GET /health` — Returns 200 with `service: healthy`; `service: degraded` plus a populated `stale_feeds` list when any store has not reported in >10 minutes. Key constraint: detects stale camera feeds without flapping to 503 on historical data.
 
-- `GET /stores` — Returns list of all known stores with their current status. Edge case: stores with zero events are still listed with null metrics.
+- `GET /stores/{store_id}/metrics` — Returns aggregated metrics (unique_visitors, conversion_rate, avg_dwell, queue_depth, abandonment_rate). Excludes is_staff=true. Key constraint: 5-minute window correlation between BILLING_QUEUE_JOIN and POS transaction.
 
-- `GET /stores/{store_id}/metrics` — Returns daily aggregated metrics (unique_visitors, conversion_rate, avg_dwell, queue_depth, abandonment_rate). Filters is_staff=True. Key constraint: 5-minute window correlation between BILLING_QUEUE_JOIN and POS transaction.
+- `GET /stores/{store_id}/funnel` — Entry → Zone → Billing → Purchase counts with drop-off %. Each stage is a SQL `COUNT(DISTINCT visitor_id)`; purchase correlation fetches only billing-join rows and bisects sorted POS timestamps. Key constraint: session is the unit; re-entries dedupe via the same visitor_id.
+
+- `GET /stores/{store_id}/heatmap` — Per-zone visit_count and avg_dwell, each normalised 0–100 (busiest zone = 100). Key constraint: data_confidence=false when fewer than 20 sessions in the window.
 
 - `GET /stores/{store_id}/events` — Returns paginated event list for a store, newest first. Supports ?event_type filter. Key constraint: cursor-based pagination for large result sets.
 
-- `POST /events/ingest` — Ingests a batch of events, idempotent by event_id. Returns count of inserted vs duplicate. Key constraint: deduplication must work across concurrent requests.
+- `POST /events/ingest` — Ingests a batch of up to 500 events, idempotent by event_id, partial success on malformed events. Publishes each accepted event to Redis. Key constraint: deduplication must work across concurrent requests.
 
 - `GET /stores/{store_id}/anomalies` — Returns active anomalies for a store. Suppresses CONVERSION_DROP when fewer than 7 days of historical data exist. Key constraint: 7-day rolling average requires history.
 
@@ -145,7 +159,11 @@ runs-once-and-exits.
 
 - The global exception handler catches all unhandled exceptions and returns structured JSON errors with error code, message, and request_id — never raw stack traces that leak internal path or dependency information.
 
-- The `/health` endpoint checks each store's `last_event_at` timestamp and returns 503 if any store has missed reporting for more than 10 minutes, treating this as a stale feed condition requiring operator intervention.
+- The `/health` endpoint checks each store's `last_event_at` timestamp and reports `service: degraded` with a populated `stale_feeds` list when any store has missed reporting for more than 10 minutes. It returns 503 only when the database itself is unreachable — a stale feed on historical data must not pin the container health check to a permanent 503.
+
+- Heavy YOLO inference triggered by `POST /pipeline/process` runs in a background subprocess (`asyncio.create_subprocess_exec`), never on the request thread, so the API stays responsive to metric and health queries while detection is in flight.
+
+- The `/funnel` endpoint computes each stage as a SQL `COUNT(DISTINCT visitor_id)` rather than loading all daily events into memory, so its cost scales with the number of distinct visitors, not raw event volume — important at 40 live stores.
 
 - Test coverage exceeds 70% with async route bodies traced correctly via `concurrency = thread` and `greenlet` in .coveragerc, ensuring async FastAPI handlers are properly covered by pytest-asyncio.
 
@@ -186,25 +204,33 @@ What I chose: Emit all detections with their actual confidence
 What I overrode: The AI's suggestion. This is the right call
   for accuracy of the conversion rate metric.
 
-### 3. Storage Engine Selection
+### 3. Live Ingestion — how detection should run behind the API
 
-What I asked: Should I use a time-series database like
-  TimescaleDB or InfluxDB for event storage given the
-  time-series nature of the data?
+What I asked: For the `POST /pipeline/process` upload endpoint,
+  how should detection actually execute so the API can accept
+  footage and still serve metrics/health while a clip is being
+  analysed?
 
-What the AI suggested: TimescaleDB — automatic partitioning
-  by time, fast range queries, built on PostgreSQL.
+What the AI suggested: Run detection inside a FastAPI
+  BackgroundTask in the same process, or push jobs onto a
+  Celery/RQ worker backed by a message broker.
 
-What I chose: Standard PostgreSQL with indexed timestamp
-  column. Reason: TimescaleDB adds operational complexity
-  (separate Docker image, extension setup) for a challenge
-  submission. The event volume (5 stores × ~100 events/hour)
-  is trivially handled by a standard indexed table. The same
-  SQLAlchemy models work for both — migration path is clear
-  if scale requires it.
+What I chose: Spawn detect.py as an out-of-process subprocess
+  via asyncio.create_subprocess_exec, tracked in an in-memory
+  job registry. Reason: a BackgroundTask runs in the same event
+  loop and a multi-minute YOLO job would starve metric and health
+  requests; Celery/RQ adds a broker, a worker image, and
+  serialization plumbing that is unjustified for a single-node
+  challenge submission. A subprocess gives true isolation (a
+  crashing clip cannot take down the API) with zero new
+  infrastructure, and reuses the exact CLI the batch path already
+  uses — one detection code path, two entry points.
 
-What I followed: The AI's suggestion to use PostgreSQL as
-  the base — disagreed only on the TimescaleDB extension.
+What I followed / overrode: Followed the AI on "don't block the
+  request thread"; overrode the specific mechanism. I documented
+  in Known Limitations that the in-memory registry is
+  single-instance — the Celery/broker design the AI proposed is
+  the right answer once detection must scale across replicas.
 
 ## Known Limitations
 
@@ -237,3 +263,9 @@ What I followed: The AI's suggestion to use PostgreSQL as
 5. Re-entry window of 30s is configurable but not adaptive —
    a customer who spends >30s outside (e.g. takes a call)
    will be counted as a new visitor.
+
+6. The detection job registry behind POST /pipeline/process is
+   in-memory and therefore single-instance: job status is lost on
+   restart and is not shared across API replicas. This is fine for
+   one node; horizontal scaling would move the registry to Redis
+   or the database and detection onto a dedicated worker pool.

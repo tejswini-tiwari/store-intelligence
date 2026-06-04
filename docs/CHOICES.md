@@ -175,10 +175,35 @@ Option A — SQLAlchemy with SQLite/PostgreSQL. Reasons:
 
 ### Trade-offs
 
-At 40 stores sending events in real-time the first thing
-that would break is the /funnel endpoint: it loads all
-events for a store for the current day into Python memory
-to build the session map. At scale this should be a
-pre-aggregated materialised view updated per ingest batch.
-The current implementation is correct for the challenge
-dataset; a production system would add aggregation.
+The original /funnel implementation loaded every event for a
+store/day into Python and ran an O(visitors × billing_joins ×
+pos) nested loop for purchase correlation — memory and CPU both
+scaled with raw event volume, which is exactly what breaks at 40
+live stores. This has since been rewritten: each funnel stage is
+a SQL `COUNT(DISTINCT visitor_id)` that executes in the database
+(no event rows shipped to the app), and purchase correlation
+fetches only the small billing-join subset and bisects sorted POS
+timestamps — O(joins × log(pos)). Re-entry dedup is now inherent
+in DISTINCT rather than hand-rolled.
+
+The next bottleneck at scale is no longer memory but repeated
+COUNT(DISTINCT) scans on every funnel/metrics request. The
+production answer is a per-session aggregate table updated on each
+ingest batch, so reads become single-row lookups. I deliberately
+did not build that for the challenge dataset (it adds write-path
+complexity and a migration) but the SQL-aggregation step makes
+the endpoint correct and bounded today, and the materialised-view
+path is a clean follow-on.
+
+### A note on the live-ingestion API choice
+
+A second API-architecture decision sits alongside storage: how
+footage enters the system. `POST /pipeline/process` accepts an
+uploaded clip and runs detect.py in an out-of-process subprocess,
+rather than blocking the request thread or standing up a
+Celery/broker worker. The full options-considered / what-AI-
+suggested / what-I-chose write-up for this lives in
+DESIGN.md → AI-Assisted Decisions #3. The store_id is supplied by
+the caller on every request, so no store identifier is hardcoded
+anywhere and a brand-new store appears automatically via
+`GET /stores` once its first event lands.
